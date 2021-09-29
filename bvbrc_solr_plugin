@@ -1,0 +1,73 @@
+#!/usr/bin/perl
+
+use strict;
+use LWP::UserAgent;
+use Getopt::Long;
+use Data::Dumper;
+use Time::HiRes 'gettimeofday';
+use JSON;
+
+my $json = JSON->new;
+
+my $config_dir = $ENV{MK_CONFDIR} // "/etc/check_mk";
+
+my $config = "$config_dir/bvbrc_solr.cfg";
+
+my @ports;
+
+if (open(CFG, "<", $config))
+{
+    local $/;
+    undef $/;
+    my $txt = <CFG>;
+    close(CFG);
+    my $dat = $json->decode($txt);
+    @ports = @{$dat->{ports}};
+}
+    
+
+my $tool_name = "bvbrc_solr";
+my $url_path = "/solr/genome/admin/ping";
+
+my $help;
+
+my $usage = "Usage: $0 [--port p]\n";
+
+GetOptions('port|p=i@' => \@ports,
+	   "help|h" => \$help)
+or die $usage;
+
+print($usage), exit 0 if $help;
+die($usage) if @ARGV > 0;
+
+my $ua = LWP::UserAgent->new();
+$ua->timeout(10);
+
+print "<<<$tool_name>>>\n";
+for my $port (@ports)
+{
+    my $url = "http://localhost:$port$url_path";
+    my $start = gettimeofday;
+    my $res = $ua->get($url);
+    my $end = gettimeofday;
+    my $elap = $end - $start;
+
+    my @s;
+    if ($res->is_success)
+    {
+	my $dat = eval { $json->decode($res->content); };
+	if ($dat)
+	{
+	    @s = ($dat->{status} // "ERR", $elap); 
+	}
+	elsif ($@)
+	{
+	    @s = ('ERR', $elap);
+	}
+    }
+    else
+    {
+	@s = ('ERR', $elap, $res->status_line);
+    }
+    print join("\t", $port, @s), "\n";
+}
